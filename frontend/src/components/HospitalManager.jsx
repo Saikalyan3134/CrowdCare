@@ -15,8 +15,12 @@ export default function HospitalManager() {
     address: "",
     contactNumber: "",
     totalBeds: "",
+    password: "",
+    confirmPassword: "",
     editingKey: null,
   });
+
+  const [passwordError, setPasswordError] = useState("");
 
   useEffect(() => {
     const hospitalsRef = ref(db, "hospitals");
@@ -26,11 +30,30 @@ export default function HospitalManager() {
   }, []);
 
   const handleChange = (e) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    setForm({ ...form, [name]: value });
+    
+    // Clear password error when user starts typing
+    if (name === "password" || name === "confirmPassword") {
+      setPasswordError("");
+    }
   };
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    
+    // Password validation for new entries only
+    if (!form.editingKey) {
+      if (form.password !== form.confirmPassword) {
+        setPasswordError("Passwords do not match!");
+        return;
+      }
+      if (form.password.length < 6) {
+        setPasswordError("Password must be at least 6 characters long!");
+        return;
+      }
+    }
+    
     if (form.editingKey) {
       update(ref(db, `hospitals/${form.editingKey}`), {
         name: form.name,
@@ -44,6 +67,7 @@ export default function HospitalManager() {
         address: form.address,
         contactNumber: form.contactNumber,
         totalBeds: form.totalBeds,
+        password: form.password, // Store password for new entries
       });
     }
     setForm({
@@ -51,8 +75,11 @@ export default function HospitalManager() {
       address: "",
       contactNumber: "",
       totalBeds: "",
+      password: "",
+      confirmPassword: "",
       editingKey: null,
     });
+    setPasswordError("");
   };
 
   const handleEdit = (key) => {
@@ -62,8 +89,11 @@ export default function HospitalManager() {
       address: hospital.address,
       contactNumber: hospital.contactNumber,
       totalBeds: hospital.totalBeds,
+      password: "",
+      confirmPassword: "",
       editingKey: key,
     });
+    setPasswordError("");
   };
 
   const handleDelete = (key) => {
@@ -113,6 +143,39 @@ export default function HospitalManager() {
             required
           />
 
+          {/* Password fields - only show for new entries */}
+          {!form.editingKey && (
+            <>
+              <input
+                name="password"
+                type="password"
+                placeholder="Set Password (min 6 characters)"
+                className="w-full px-4 py-2 border-2 border-cyan-400 dark:border-cyan-700 bg-cyan-50 dark:bg-zinc-800 text-gray-900 dark:text-cyan-50 rounded-lg shadow-sm focus:ring-2 focus:ring-cyan-400 transition"
+                value={form.password}
+                onChange={handleChange}
+                required
+                minLength={6}
+              />
+              <input
+                name="confirmPassword"
+                type="password"
+                placeholder="Confirm Password"
+                className="w-full px-4 py-2 border-2 border-cyan-400 dark:border-cyan-700 bg-cyan-50 dark:bg-zinc-800 text-gray-900 dark:text-cyan-50 rounded-lg shadow-sm focus:ring-2 focus:ring-cyan-400 transition"
+                value={form.confirmPassword}
+                onChange={handleChange}
+                required
+                minLength={6}
+              />
+            </>
+          )}
+
+          {/* Password error message */}
+          {passwordError && (
+            <div className="bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-200 p-3 rounded-md text-center">
+              {passwordError}
+            </div>
+          )}
+
           <div className="flex gap-2">
             <button
               className="px-6 py-2 bg-cyan-600 hover:bg-teal-500 text-white rounded-lg font-semibold shadow-lg transition-all"
@@ -124,15 +187,18 @@ export default function HospitalManager() {
               <button
                 className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-500 transition"
                 type="button"
-                onClick={() =>
+                onClick={() => {
                   setForm({
                     name: "",
                     address: "",
                     contactNumber: "",
                     totalBeds: "",
+                    password: "",
+                    confirmPassword: "",
                     editingKey: null,
-                  })
-                }
+                  });
+                  setPasswordError("");
+                }}
               >
                 Cancel Edit
               </button>
