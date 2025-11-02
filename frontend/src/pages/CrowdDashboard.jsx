@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { HiMapPin, HiArrowLeftOnRectangle, HiCheckCircle, HiXMark, HiArrowTopRightOnSquare } from "react-icons/hi2";
 import { getTopRecommendations } from "../utils/hospitalScoring";
 
-// ---- utilities ----
+// Haversine distance in KM
 function haversineKm(a, b) {
   if (!a || !b || a.lat == null || a.lng == null || b.lat == null || b.lng == null) return null;
   const toRad = (d) => (d * Math.PI) / 180;
@@ -18,7 +18,7 @@ function haversineKm(a, b) {
   return 2 * R * Math.asin(Math.sqrt(s1 + s2));
 }
 
-// ---- Map ----
+// Leaflet Navigation Component
 function NavigationMap({ origin, destination }) {
   const mapInstance = React.useRef(null);
   const mapContainerRef = React.useRef(null);
@@ -31,7 +31,7 @@ function NavigationMap({ origin, destination }) {
     const maxPolls = 50;
     const pollInterval = setInterval(() => {
       pollCount++;
-      if (window.L && typeof window.L.map === "function") {
+      if (window.L && typeof window.L.map === 'function') {
         setMapLoaded(true);
         clearInterval(pollInterval);
       } else if (pollCount >= maxPolls) {
@@ -50,11 +50,11 @@ function NavigationMap({ origin, destination }) {
 
     if (mapInstance.current) {
       try {
-        if (mapInstance.current.remove && typeof mapInstance.current.remove === "function") {
+        if (mapInstance.current.remove && typeof mapInstance.current.remove === 'function') {
           mapInstance.current.remove();
         }
         if (mapContainerRef.current) {
-          mapContainerRef.current.innerHTML = "";
+          mapContainerRef.current.innerHTML = '';
         }
         mapInstance.current = null;
       } catch (e) {
@@ -68,22 +68,22 @@ function NavigationMap({ origin, destination }) {
         zoom: 14,
       });
 
-      window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        attribution: "© OpenStreetMap contributors",
+      window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
         maxZoom: 19,
       }).addTo(map);
 
-      window.L.marker([origin.lat, origin.lng]).addTo(map).bindPopup("Your Location");
+      window.L.marker([origin.lat, origin.lng])
+        .addTo(map)
+        .bindPopup("Your Location");
+
       window.L.marker([destination.lat, destination.lng])
         .addTo(map)
-        .bindPopup(destination?.name ? destination.name : "Hospital");
+        .bindPopup((destination && destination.name) ? destination.name : "Hospital");
 
       window.L.polyline(
-        [
-          [origin.lat, origin.lng],
-          [destination.lat, destination.lng],
-        ],
-        { color: "#0891b2", weight: 4 }
+        [[origin.lat, origin.lng], [destination.lat, destination.lng]],
+        { color: '#0891b2', weight: 4 }
       ).addTo(map);
 
       const group = new window.L.featureGroup([
@@ -93,7 +93,7 @@ function NavigationMap({ origin, destination }) {
       map.fitBounds(group.getBounds().pad(0.1));
 
       mapInstance.current = map;
-
+      
       const dist = haversineKm(origin, destination);
       setDistance(dist);
       setMapError(null);
@@ -105,11 +105,11 @@ function NavigationMap({ origin, destination }) {
     return () => {
       if (mapInstance.current) {
         try {
-          if (mapInstance.current.remove && typeof mapInstance.current.remove === "function") {
+          if (mapInstance.current.remove && typeof mapInstance.current.remove === 'function') {
             mapInstance.current.remove();
           }
           if (mapContainerRef.current) {
-            mapContainerRef.current.innerHTML = "";
+            mapContainerRef.current.innerHTML = '';
           }
           mapInstance.current = null;
         } catch (e) {
@@ -120,31 +120,36 @@ function NavigationMap({ origin, destination }) {
   }, [mapLoaded, origin, destination]);
 
   const openGoogleMaps = () => {
-    if (!origin || !destination || !origin.lat || !origin.lng || !destination.lat || !destination.lng) return;
+    if (!origin || !destination || !origin.lat || !origin.lng || !destination.lat || !destination.lng) {
+      return;
+    }
+    
     const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin.lat},${origin.lng}&destination=${destination.lat},${destination.lng}`;
-    window.open(googleMapsUrl, "_blank");
+    window.open(googleMapsUrl, '_blank');
   };
 
   return (
-    <div style={{ position: "relative" }}>
+    <div style={{ position: 'relative' }}>
       {mapError && (
-        <div className="mb-4 p-3 rounded-lg bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 text-sm">{mapError}</div>
+        <div className="mb-4 p-3 rounded-lg bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200 text-sm">
+          {mapError}
+        </div>
       )}
       {!mapLoaded && !mapError && (
         <div className="mb-4 p-3 rounded-lg bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-200 text-sm">
           Loading map...
         </div>
       )}
-      <div style={{ position: "relative" }}>
+      <div style={{ position: 'relative' }}>
         <div
           ref={mapContainerRef}
-          style={{
-            width: "100%",
-            height: "400px",
-            borderRadius: "1rem",
+          style={{ 
+            width: "100%", 
+            height: "400px", 
+            borderRadius: "1rem", 
             marginBottom: 16,
             backgroundColor: "#f0f0f0",
-            minHeight: "400px",
+            minHeight: "400px"
           }}
         />
         {mapLoaded && origin && destination && (
@@ -170,7 +175,6 @@ function NavigationMap({ origin, destination }) {
   );
 }
 
-// ---- Page ----
 export default function CrowdDashboard() {
   const navigate = useNavigate();
   const locationIntervalRef = useRef(null);
@@ -191,10 +195,10 @@ export default function CrowdDashboard() {
   const [distanceToHospital, setDistanceToHospital] = useState(null);
   const [navigationUpdateInterval, setNavigationUpdateInterval] = useState(null);
 
-  // login
+  // Handle login with contact number only
   const handleLogin = (e) => {
     e.preventDefault();
-    if (!contactNumber || contactNumber.replace(/\D/g, "").length < 10) {
+    if (!contactNumber || contactNumber.length < 10) {
       setMessage("❌ Please enter a valid contact number");
       setTimeout(() => setMessage(""), 3000);
       return;
@@ -204,7 +208,7 @@ export default function CrowdDashboard() {
     setTimeout(() => setMessage(""), 3000);
   };
 
-  // location
+  // Live location
   const getLiveLocation = async () =>
     new Promise((resolve) => {
       if ("geolocation" in navigator) {
@@ -241,7 +245,7 @@ export default function CrowdDashboard() {
     setLocationLoading(false);
   };
 
-  // hospitals
+  // Hospitals stream
   useEffect(() => {
     const r = ref(db, "hospitals");
     const h = onValue(r, (snap) => {
@@ -252,7 +256,7 @@ export default function CrowdDashboard() {
     return () => off(r, "value", h);
   }, []);
 
-  // recommender
+  // AI Recommendation logic
   const handleGetRecommendation = async () => {
     setRecommendLoading(true);
     setRecommended(null);
@@ -263,20 +267,26 @@ export default function CrowdDashboard() {
         setRecommendLoading(false);
         return;
       }
+
       const hospitalsObj = Object.fromEntries(hospitals.map((h) => [h.id, h]));
       const result = getTopRecommendations(hospitalsObj, location.lat, location.lng, serviceNeeded);
+
       setRecommended(result);
-      setMessage(result?.recommended ? `✅ Best match: ${result.recommended.name}` : "❌ No matching hospitals");
+
+      if (result?.recommended) {
+        setMessage(`✅ Best match: ${result.recommended.name}`);
+      } else {
+        setMessage("❌ No matching hospitals");
+      }
     } catch (error) {
       console.error("Error:", error);
       setMessage("❌ Error: " + error.message);
     } finally {
       setRecommendLoading(false);
-      setTimeout(() => setMessage(""), 3000);
     }
   };
 
-  // alert hospital (writes to unified prealerts path)
+  // Alert hospital (updated to use prealerts path and pending status for consistency with hospital dashboard)
   const handleAlertHospital = async (hospital) => {
     if (!hospital || !location) {
       setMessage("❌ Missing required info");
@@ -284,20 +294,22 @@ export default function CrowdDashboard() {
     }
 
     try {
-      const createdAt = Date.now();
       const alertData = {
         type: "crowd",
-        contactNumber,
+        contactNumber: contactNumber,
         hospitalName: hospital.name,
         hospitalPhone: hospital.contact?.phone || "No phone",
-        status: "pending",
-        createdAt,
+        status: "pending", // Changed to "pending" to match hospital accept/decline flow
+        createdAt: Date.now(),
         userLocation: { lat: location.lat, lng: location.lng },
       };
 
-      await set(ref(db, `prealerts/${hospital.id}/${createdAt}`), alertData);
+      // Updated path to prealerts for unified handling in hospital dashboard
+      const alertPath = `prealerts/${hospital.id}/${Date.now()}`;
+      await set(ref(db, alertPath), alertData);
 
       setMessage(`✅ Alert sent to ${hospital.name}! Hospital will review shortly.`);
+
       setNavigationHospital({
         ...hospital,
         id: hospital.id,
@@ -329,16 +341,19 @@ export default function CrowdDashboard() {
       setTimeout(() => setMessage(""), 3000);
       return;
     }
+
     try {
       setMessage("✅ Reached hospital! Thank you.");
       setShowNavigation(false);
       setNavigationHospital(null);
       setRecommended(null);
       setServiceNeeded("Basic");
+
       if (navigationUpdateInterval) {
         clearInterval(navigationUpdateInterval);
         setNavigationUpdateInterval(null);
       }
+
       setTimeout(() => setMessage(""), 3000);
     } catch (error) {
       console.error("Error:", error);
@@ -361,16 +376,27 @@ export default function CrowdDashboard() {
     setTimeout(() => setMessage(""), 2500);
   };
 
-  // login screen
+  // Login Screen
   if (!isLoggedIn) {
     return (
       <div className="min-h-screen bg-gradient-to-tr from-blue-100 via-cyan-100 to-teal-100 dark:from-blue-950 dark:via-cyan-900 dark:to-teal-950 p-4 md:p-8 flex items-center justify-center">
-        <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl max-w-md w-full p-8">
-          <h1 className="text-3xl md:text-4xl font-black text-cyan-800 dark:text-cyan-100 mb-6 text-center">🚨 Emergency Call</h1>
-
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl max-w-md w-full p-8"
+        >
+          <h1 className="text-3xl md:text-4xl font-black text-cyan-800 dark:text-cyan-100 mb-6 text-center">
+            🚨 Emergency Call
+          </h1>
+          
           <AnimatePresence>
             {message && (
-              <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="mb-4 p-3 rounded-lg text-center font-semibold bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200">
+              <motion.div
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                className="mb-4 p-3 rounded-lg text-center font-semibold bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200"
+              >
                 {message}
               </motion.div>
             )}
@@ -378,7 +404,9 @@ export default function CrowdDashboard() {
 
           <form onSubmit={handleLogin} className="space-y-4">
             <div>
-              <label className="block text-sm font-semibold text-cyan-800 dark:text-cyan-100 mb-2">Contact Number *</label>
+              <label className="block text-sm font-semibold text-cyan-800 dark:text-cyan-100 mb-2">
+                Contact Number *
+              </label>
               <input
                 type="tel"
                 placeholder="Enter your contact number"
@@ -389,45 +417,68 @@ export default function CrowdDashboard() {
               <p className="text-xs text-cyan-700 dark:text-cyan-300 mt-1">Format: 10 digits (e.g., 9876543210)</p>
             </div>
 
-            <button type="submit" className="w-full px-4 py-3 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold text-lg transition-all shadow-lg hover:shadow-xl">
+            <button
+              type="submit"
+              className="w-full px-4 py-3 rounded-lg bg-red-600 hover:bg-red-700 text-white font-bold text-lg transition-all shadow-lg hover:shadow-xl"
+            >
               Login & Get Help
             </button>
           </form>
 
-          <p className="text-center text-cyan-700 dark:text-cyan-300 text-sm mt-6">For medical emergencies, get AI-recommended hospitals near you instantly.</p>
+          <p className="text-center text-cyan-700 dark:text-cyan-300 text-sm mt-6">
+            For medical emergencies, get AI-recommended hospitals near you instantly.
+          </p>
         </motion.div>
       </div>
     );
   }
 
-  // main dashboard
+  // Main Dashboard
   return (
     <div className="min-h-screen bg-gradient-to-tr from-blue-100 via-cyan-100 to-teal-100 dark:from-blue-950 dark:via-cyan-900 dark:to-teal-950 p-4 md:p-8">
       <div className="max-w-5xl mx-auto space-y-6">
+        {/* Header */}
         <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="flex items-center justify-between">
           <h1 className="text-3xl md:text-4xl font-black text-red-600 dark:text-red-400">🚨 Emergency Help</h1>
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white/80 dark:bg-zinc-900/80 ring-1 ring-cyan-200 dark:ring-cyan-900 shadow">
               <HiMapPin className="w-5 h-5 text-cyan-600" />
-              <div className="text-xs md:text-sm text-cyan-800 dark:text-cyan-100 font-semibold">{location ? `${location.lat.toFixed(3)}, ${location.lng.toFixed(3)}` : "Locating..."}</div>
-              <button onClick={handleManualLocationUpdate} disabled={locationLoading} className="text-xs px-2 py-1 rounded bg-cyan-600 text-white hover:bg-cyan-700 disabled:bg-gray-400">
+              <div className="text-xs md:text-sm text-cyan-800 dark:text-cyan-100 font-semibold">
+                {location ? `${location.lat.toFixed(3)}, ${location.lng.toFixed(3)}` : "Locating..."}
+              </div>
+              <button
+                onClick={handleManualLocationUpdate}
+                disabled={locationLoading}
+                className="text-xs px-2 py-1 rounded bg-cyan-600 text-white hover:bg-cyan-700 disabled:bg-gray-400"
+              >
                 {locationLoading ? "..." : "Update"}
               </button>
             </div>
-            <button onClick={handleLogout} className="p-3 rounded-full bg-red-600 hover:bg-red-700 text-white transition-all shadow-lg" title="Sign out">
+            <button
+              onClick={handleLogout}
+              className="p-3 rounded-full bg-red-600 hover:bg-red-700 text-white transition-all shadow-lg"
+              title="Sign out"
+            >
               <HiArrowLeftOnRectangle className="w-5 h-5" />
             </button>
           </div>
         </motion.div>
 
+        {/* Toast */}
         <AnimatePresence>
           {message && (
-            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="p-3 rounded-lg text-center font-semibold bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200">
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="p-3 rounded-lg text-center font-semibold bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200"
+            >
               {message}
             </motion.div>
           )}
         </AnimatePresence>
 
+        {/* Crowd Info Card */}
         <div className="rounded-xl p-4 bg-white/80 dark:bg-zinc-900/80 ring-1 ring-cyan-100 dark:ring-cyan-900 shadow">
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
             <div>
@@ -445,13 +496,14 @@ export default function CrowdDashboard() {
           </div>
         </div>
 
+        {/* Recommendation or Navigation section */}
         {!showNavigation ? (
           <div className="rounded-2xl p-4 bg-white/80 dark:bg-zinc-900/80 ring-1 ring-cyan-100 dark:ring-cyan-900 shadow-lg">
             <h2 className="text-xl font-bold text-cyan-800 dark:text-cyan-100 mb-3">🏥 Find Nearest Hospital</h2>
             <div className="flex gap-2 mb-3">
               <select
                 value={serviceNeeded}
-                onChange={(e) => setServiceNeeded(e.target.value)}
+                onChange={e => setServiceNeeded(e.target.value)}
                 className="flex-1 px-3 py-2 rounded border border-cyan-300 dark:border-cyan-700 bg-white dark:bg-zinc-800 text-sm"
               >
                 <option value="Basic">Basic Medical</option>
@@ -459,39 +511,50 @@ export default function CrowdDashboard() {
                 <option value="ICU">ICU Care</option>
                 <option value="Emergency">Critical Emergency</option>
               </select>
-              <button onClick={handleGetRecommendation} disabled={recommendLoading || !location} className="px-4 py-2 rounded bg-red-600 hover:bg-red-700 text-white font-semibold disabled:bg-gray-400">
+              <button
+                onClick={handleGetRecommendation}
+                disabled={recommendLoading || !location}
+                className="px-4 py-2 rounded bg-red-600 hover:bg-red-700 text-white font-semibold disabled:bg-gray-400"
+              >
                 {recommendLoading ? "🔄 Finding..." : "🎯 Find Hospital"}
               </button>
             </div>
-
             <AnimatePresence>
               {recommended?.recommended && (
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-2">
+                  {/* Main recommendation */}
                   <div className="p-3 rounded-lg bg-green-100 dark:bg-green-900/30 border-2 border-green-500">
-                    <p className="font-bold text-green-900 dark:text-green-100 text-lg">✅ NEAREST HOSPITAL: {recommended.recommended.name}</p>
+                    <p className="font-bold text-green-900 dark:text-green-100 text-lg">
+                      ✅ NEAREST HOSPITAL: {recommended.recommended.name}
+                    </p>
                     <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
                       <span className="text-green-800 dark:text-green-200">📍 Distance: {recommended.recommended.distance} km</span>
                       <span className="text-green-800 dark:text-green-200">🚑 Incoming: {recommended.recommended.incomingAmbulances}</span>
                       <span className="text-green-800 dark:text-green-200">🛏️ Beds: {recommended.recommended.beds}</span>
                       <span className="text-green-800 dark:text-green-200">⭐ Score: {recommended.recommended.totalScore}</span>
                     </div>
-                    <button onClick={() => handleAlertHospital(recommended.recommended)} className="w-full mt-3 px-3 py-2 rounded bg-red-600 hover:bg-red-700 text-white font-semibold">
+                    <button
+                      onClick={() => handleAlertHospital(recommended.recommended)}
+                      className="w-full mt-3 px-3 py-2 rounded bg-red-600 hover:bg-red-700 text-white font-semibold"
+                    >
                       Alert Hospital & Navigate
                     </button>
                   </div>
-
+                  {/* Alternatives */}
                   {recommended.alternates && recommended.alternates.length > 0 && (
                     <div className="mt-3">
                       <p className="text-sm font-semibold text-cyan-800 dark:text-cyan-100 mb-2">📋 Other Options:</p>
                       {recommended.alternates.map((alt, idx) => (
-                        <div key={alt.id || idx} className="p-2 mb-2 rounded bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800 flex flex-col">
-                          <span className="font-bold text-cyan-800 dark:text-cyan-200">
-                            {idx + 2}. {alt.name}
-                          </span>
+                        <div key={alt.id || idx}
+                          className="p-2 mb-2 rounded bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800 flex flex-col">
+                          <span className="font-bold text-cyan-800 dark:text-cyan-200">{idx + 2}. {alt.name}</span>
                           <span className="text-xs text-cyan-700 dark:text-cyan-300">
                             {alt.distance} km • Incoming: {alt.incomingAmbulances} • Beds: {alt.beds}
                           </span>
-                          <button onClick={() => handleAlertHospital(alt)} className="w-full mt-2 px-3 py-2 rounded bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-semibold">
+                          <button
+                            onClick={() => handleAlertHospital(alt)}
+                            className="w-full mt-2 px-3 py-2 rounded bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-semibold"
+                          >
                             Select This Hospital
                           </button>
                         </div>
@@ -505,7 +568,9 @@ export default function CrowdDashboard() {
         ) : (
           <div className="rounded-2xl p-4 bg-white/80 dark:bg-zinc-900/80 ring-1 ring-cyan-100 dark:ring-cyan-900 shadow-lg">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold text-cyan-800 dark:text-cyan-100">📍 Navigate to {navigationHospital?.name}</h2>
+              <h2 className="text-xl font-bold text-cyan-800 dark:text-cyan-100">
+                📍 Navigate to {navigationHospital?.name}
+              </h2>
               <button
                 onClick={() => {
                   setShowNavigation(false);
@@ -517,9 +582,14 @@ export default function CrowdDashboard() {
                 <HiXMark className="w-6 h-6" />
               </button>
             </div>
-
             {navigationHospital?.location && location && (
-              <NavigationMap origin={location} destination={{ ...navigationHospital.location, name: navigationHospital.name }} />
+              <NavigationMap 
+                origin={location} 
+                destination={{
+                  ...navigationHospital.location,
+                  name: navigationHospital.name
+                }} 
+              />
             )}
 
             <div className="mt-4 grid grid-cols-2 gap-3">
@@ -550,6 +620,12 @@ export default function CrowdDashboard() {
               <HiCheckCircle className="w-6 h-6" />
               I've Arrived
             </button>
+
+            {distanceToHospital && distanceToHospital > 0.5 && (
+              <p className="text-xs text-orange-700 dark:text-orange-300 mt-3 text-center">
+                ⚠️ Get closer to the hospital (Current: {distanceToHospital < 1 ? `${(distanceToHospital * 1000).toFixed(0)}m` : `${distanceToHospital.toFixed(2)}km`})
+              </p>
+            )}
           </div>
         )}
       </div>

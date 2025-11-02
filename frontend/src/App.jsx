@@ -12,6 +12,7 @@ import HospitalManage from "./pages/HospitalManage";
 import HospitalPrealerts from "./pages/HospitalPrealerts";
 import DriverDashboard from "./pages/DriverDashboard";
 import PatientManagement from "./pages/PatientManagement";
+import CrowdDashboard from "./pages/CrowdDashboard";
 
 function Shell() {
   const { pathname } = useLocation();
@@ -37,6 +38,7 @@ function Shell() {
         <Route path="/hospital/patients" element={<PatientManagement />} />
 
         <Route path="/DRdashboard" element={<DriverDashboard />} />
+        <Route path="/crowddashboard" element={<CrowdDashboard />} />
       </Routes>
       </div>
     </>

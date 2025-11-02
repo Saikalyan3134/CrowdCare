@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useRef, useMemo } from "react";
+// src/pages/HospitalPrealerts.jsx
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { signOut } from "firebase/auth";
 import { ref, onValue, off, set, update } from "firebase/database";
 import { db, auth } from "../firebase/firebase";
 import { onAuthStateChanged } from "firebase/auth";
@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { HiCheckCircle, HiPhone, HiMapPin, HiClock } from "react-icons/hi2";
 import HospitalSidebar from "../components/HospitalSidebar";
 
-// Haversine distance in KM
+// ---- utilities ----
 function haversineKm(a, b) {
   if (!a || !b || a.lat == null || a.lng == null || b.lat == null || b.lng == null) return null;
   const toRad = (d) => (d * Math.PI) / 180;
@@ -19,9 +19,8 @@ function haversineKm(a, b) {
   const s2 = Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(s1 + s2));
 }
-
-// Format ETA
 function formatETA(minutes) {
+  if (minutes == null) return "—";
   if (minutes < 1) return "< 1 min";
   if (minutes === 1) return "1 min";
   if (minutes < 60) return `${minutes} mins`;
@@ -30,9 +29,8 @@ function formatETA(minutes) {
   if (mins === 0) return `${hours}h`;
   return `${hours}h ${mins}m`;
 }
-
-// Calculate ETA
 function calculateETA(distanceKm) {
+  if (distanceKm == null) return "—";
   const speedKmh = 40;
   const timeHours = distanceKm / speedKmh;
   const timeMinutes = Math.round(timeHours * 60);
@@ -50,7 +48,7 @@ export default function HospitalPrealerts() {
   const [recalcTrigger, setRecalcTrigger] = useState(0);
   const [message, setMessage] = useState("");
 
-  // Auth user
+  // auth + hospital location
   useEffect(() => {
     const sub = onAuthStateChanged(auth, async (u) => {
       if (!u) {
@@ -61,11 +59,8 @@ export default function HospitalPrealerts() {
       try {
         const hs = await new Promise((resolve) => {
           const r = ref(db, `hospitals/${u.uid}/location`);
-          onValue(r, (snap) => {
-            resolve(snap.val());
-          }, { onlyOnce: true });
+          onValue(r, (snap) => resolve(snap.val()), { onlyOnce: true });
         });
-        
         if (hs && typeof hs.lat === "number" && typeof hs.lng === "number") {
           setHospitalLoc(hs);
         }
@@ -76,7 +71,7 @@ export default function HospitalPrealerts() {
     return () => sub();
   }, [navigate]);
 
-  // Subscribe to prealerts
+  // unified prealerts stream
   useEffect(() => {
     if (!uid) return;
     const r = ref(db, `prealerts/${uid}`);
@@ -87,13 +82,13 @@ export default function HospitalPrealerts() {
     return () => off(r, "value", h);
   }, [uid]);
 
-  // Subscribe to driver locations
+  // driver locations stream for drivers found in alerts
   useEffect(() => {
     const subs = [];
     const ids = Array.from(
       new Set(
-        Object.values(prealerts)
-          .map((p) => p && p.driverId)
+        Object.entries(prealerts)
+          .map(([key, p]) => (p?.driverId ? p.driverId : null))
           .filter(Boolean)
       )
     );
@@ -107,11 +102,9 @@ export default function HospitalPrealerts() {
     return () => subs.forEach(({ r, h }) => off(r, "value", h));
   }, [prealerts]);
 
-  // Auto-recalculate distance every 30 seconds
+  // periodic recalc
   useEffect(() => {
-    recalcTimerRef.current = setInterval(() => {
-      setRecalcTrigger((prev) => prev + 1);
-    }, 30000);
+    recalcTimerRef.current = setInterval(() => setRecalcTrigger((x) => x + 1), 30000);
     return () => {
       if (recalcTimerRef.current) clearInterval(recalcTimerRef.current);
     };
@@ -130,100 +123,99 @@ export default function HospitalPrealerts() {
       gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
       oscillator.start(audioContext.currentTime);
       oscillator.stop(audioContext.currentTime + 0.5);
-    } catch (err) {
-      console.warn("Audio notification failed:", err);
+    } catch {
+      // ignore
     }
   };
 
-  // ✅ COMPUTE ACTIVE AND COMPLETED ALERTS (DEFINE FIRST)
+  // compute Active vs Completed (arrived/declined -> Completed)
   const { activeAlerts, completedAlerts, incomingCount } = useMemo(() => {
     if (!hospitalLoc) return { activeAlerts: [], completedAlerts: [], incomingCount: 0 };
 
+    const list = Object.entries(prealerts).map(([key, p]) => ({ ...p, alertId: key }));
     const active = [];
     const completed = [];
-    let totalIncoming = 0;
+    let incoming = 0;
 
-    Object.entries(prealerts).forEach(([alertId, p]) => {
+    list.forEach((p) => {
       if (!p) return;
-      const d = driverLoc[p.driverId];
 
       let distanceKm = null;
-      let eta = "Calculating...";
-
-      if (
-        d &&
-        d.lat !== undefined &&
-        d.lng !== undefined &&
-        hospitalLoc.lat !== undefined &&
-        hospitalLoc.lng !== undefined
-      ) {
-        distanceKm = haversineKm(d, hospitalLoc);
-        eta = calculateETA(distanceKm);
+      if (p.type === "crowd" && p.userLocation) {
+        distanceKm = haversineKm(p.userLocation, hospitalLoc);
+      } else if (p.driverId && driverLoc[p.driverId]) {
+        distanceKm = haversineKm(driverLoc[p.driverId], hospitalLoc);
       }
+      const eta = calculateETA(distanceKm);
+      const alert = { ...p, distanceKm, eta };
 
-      const alert = {
-        alertId,
-        ...p,
-        distanceKm,
-        eta,
-      };
-
-      if (p.status === "arrived") {
+      // Completed list: arrived or declined
+      if (p.status === "arrived" || p.status === "declined") {
         completed.push(alert);
-      } else if (p.status === "en_route" || !p.status) {
-        active.push(alert);
-        totalIncoming++;
+        return;
       }
+
+      // Active list: pending/en_route/no status
+      if (p.status === "pending" || p.status === "en_route" || !p.status) {
+        active.push(alert);
+        incoming++;
+        return;
+      }
+
+      // Any other status -> treat as active (optional)
+      active.push(alert);
     });
 
-    return {
-      activeAlerts: active.sort((a, b) => (a.distanceKm || Infinity) - (b.distanceKm || Infinity)),
-      completedAlerts: completed.sort((a, b) => (b.arrivedAt || 0) - (a.arrivedAt || 0)),
-      incomingCount: totalIncoming,
-    };
+    active.sort((a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity));
+    completed.sort(
+      (a, b) => (b.arrivedAt || b.declinedAt || 0) - (a.arrivedAt || a.declinedAt || 0)
+    );
+
+    return { activeAlerts: active, completedAlerts: completed, incomingCount: incoming };
   }, [prealerts, driverLoc, hospitalLoc, recalcTrigger]);
 
-  // ✅ SYNC ACTIVE COUNT TO DATABASE (AFTER activeAlerts is defined)
+  // sync inflowActive with number of active alerts
   useEffect(() => {
     if (!uid) return;
-
-    const syncInflowActive = async () => {
+    (async () => {
       try {
-        const inflowRef = ref(db, `hospitals/${uid}/stats/inflowActive`);
-        await set(inflowRef, activeAlerts.length);
-        console.log(`✅ Synced inflowActive: ${activeAlerts.length}`);
-      } catch (error) {
-        console.error("❌ Error syncing inflowActive:", error);
+        await set(ref(db, `hospitals/${uid}/stats/inflowActive`), activeAlerts.length);
+      } catch (e) {
+        console.error("Error syncing inflowActive", e);
       }
-    };
-
-    syncInflowActive();
+    })();
   }, [uid, activeAlerts.length]);
 
-  // Mark as arrived
-  const markArrived = async (alertId, distanceKm) => {
+  // actions
+  const markArrived = async (alertId) => {
     if (!uid) {
       setMessage("❌ Hospital ID not found");
       return;
     }
-
-    if (distanceKm > 0.5) {
-      setMessage(`⚠️ Ambulance is still ${(distanceKm * 1000).toFixed(0)}m away.`);
-      setTimeout(() => setMessage(""), 3000);
-      return;
-    }
-
     try {
       await update(ref(db, `prealerts/${uid}/${alertId}`), {
         status: "arrived",
         arrivedAt: Date.now(),
       });
-
       setMessage("✅ Marked as arrived! Inflow updated.");
       setTimeout(() => setMessage(""), 3000);
     } catch (err) {
-      console.error("Error marking arrived:", err);
-      setMessage("❌ Error updating status: " + err.message);
+      setMessage("❌ Error: " + err.message);
+      setTimeout(() => setMessage(""), 3000);
+    }
+  };
+
+  const declineAlert = async (alertId) => {
+    if (!uid) return;
+    try {
+      await update(ref(db, `prealerts/${uid}/${alertId}`), {
+        status: "declined",
+        declinedAt: Date.now(),
+      });
+      setMessage("⛔ Alert declined");
+      setTimeout(() => setMessage(""), 3000);
+    } catch (e) {
+      setMessage("❌ Error: " + e.message);
       setTimeout(() => setMessage(""), 3000);
     }
   };
@@ -247,7 +239,10 @@ export default function HospitalPrealerts() {
                 Pre‑Alerts
               </h1>
               <div className="text-cyan-900/80 dark:text-cyan-100/80 text-sm font-semibold flex gap-4">
-                <span>🚑 Incoming: <span className="text-red-600 font-bold">{stats.incoming}</span></span>
+                <span>
+                  🚨 Incoming:{" "}
+                  <span className="text-red-600 font-bold">{stats.incoming}</span>
+                </span>
                 <span>Active: {stats.active}</span>
                 <span>Completed: {stats.completed}</span>
               </div>
@@ -256,7 +251,7 @@ export default function HospitalPrealerts() {
 
           {/* Content */}
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-8">
-            {/* Message Toast */}
+            {/* Toast */}
             <AnimatePresence>
               {message && (
                 <motion.div
@@ -266,7 +261,9 @@ export default function HospitalPrealerts() {
                   className={`p-3 rounded-lg text-center font-semibold ${
                     message.includes("✅")
                       ? "bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200"
-                      : "bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200"
+                      : message.includes("⛔")
+                      ? "bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200"
+                      : "bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200"
                   }`}
                 >
                   {message}
@@ -275,11 +272,11 @@ export default function HospitalPrealerts() {
             </AnimatePresence>
 
             {/* ACTIVE ALERTS */}
-            <div>
+            <section>
               <div className="flex items-center gap-2 mb-4">
                 <div className="w-1 h-8 bg-gradient-to-b from-red-500 to-orange-500 rounded-full"></div>
                 <h2 className="text-2xl font-bold text-cyan-800 dark:text-cyan-100">
-                  🚑 Active Alerts (Updates every 30s)
+                  🚑 Active Alerts (auto‑updates every 30s)
                 </h2>
                 <span className="ml-auto px-3 py-1 bg-red-600 text-white rounded-full text-sm font-bold">
                   {activeAlerts.length}
@@ -290,8 +287,8 @@ export default function HospitalPrealerts() {
                 <div className="grid md:grid-cols-2 gap-4">
                   <AnimatePresence mode="popLayout">
                     {activeAlerts.map((alert, idx) => {
+                      const isCrowd = alert.type === "crowd";
                       const distanceMeters = alert.distanceKm ? alert.distanceKm * 1000 : null;
-                      const canMarkArrived = alert.distanceKm && alert.distanceKm < 0.5;
 
                       return (
                         <motion.div
@@ -300,17 +297,17 @@ export default function HospitalPrealerts() {
                           initial={{ opacity: 0, y: 20 }}
                           animate={{ opacity: 1, y: 0 }}
                           exit={{ opacity: 0, y: -20 }}
-                          transition={{ delay: idx * 0.1 }}
+                          transition={{ delay: idx * 0.06 }}
                           className="rounded-2xl p-6 bg-gradient-to-br from-red-50 to-orange-50 dark:from-red-900/30 dark:to-orange-900/30 ring-2 ring-red-300 dark:ring-red-700 hover:shadow-xl transition-shadow"
                         >
                           {/* Header */}
                           <div className="flex items-start justify-between mb-4">
                             <div>
                               <p className="text-xs font-semibold text-red-700 dark:text-red-300 uppercase tracking-wide">
-                                En Route
+                                {isCrowd ? "Crowd Alert" : "En Route"}
                               </p>
                               <h3 className="text-xl font-bold text-red-900 dark:text-red-100 mt-1">
-                                {alert.ambulanceType || "Ambulance"}
+                                {isCrowd ? "Crowd Emergency" : alert.ambulanceType || "Ambulance"}
                               </h3>
                             </div>
                             <div className="px-3 py-1 bg-red-600 text-white rounded-full">
@@ -319,30 +316,41 @@ export default function HospitalPrealerts() {
                             </div>
                           </div>
 
-                          {/* Driver & Ambulance Info */}
+                          {/* Info */}
                           <div className="bg-white/60 dark:bg-zinc-800/60 p-3 rounded-lg mb-4 space-y-2">
-                            <p className="text-sm text-gray-700 dark:text-gray-300">
-                              <span className="font-semibold">Driver:</span> {alert.driverName || alert.driverId || "—"}
-                            </p>
-                            <p className="text-sm text-gray-700 dark:text-gray-300">
-                              <span className="font-semibold">Ambulance #:</span> {alert.ambulanceNumber || "—"}
-                            </p>
-                            <p className="text-sm text-gray-700 dark:text-gray-300">
-                              <span className="font-semibold">Phone:</span>{" "}
-                              <a href={`tel:${alert.driverPhone}`} className="text-blue-600 hover:underline">
-                                {alert.driverPhone || "—"}
-                              </a>
-                            </p>
+                            {isCrowd ? (
+                              <>
+                                <p className="text-sm text-gray-700 dark:text-gray-300">
+                                  <span className="font-semibold">Contact:</span>{" "}
+                                  {alert.contactNumber || "—"}
+                                </p>
+                              </>
+                            ) : (
+                              <>
+                                <p className="text-sm text-gray-700 dark:text-gray-300">
+                                  <span className="font-semibold">Driver:</span>{" "}
+                                  {alert.driverName || alert.driverId || "—"}
+                                </p>
+                                <p className="text-sm text-gray-700 dark:text-gray-300">
+                                  <span className="font-semibold">Ambulance #:</span>{" "}
+                                  {alert.ambulanceNumber || "—"}
+                                </p>
+                                <p className="text-sm text-gray-700 dark:text-gray-300">
+                                  <span className="font-semibold">Phone:</span>{" "}
+                                  <a
+                                    href={`tel:${alert.driverPhone || ""}`}
+                                    className="text-blue-600 hover:underline"
+                                  >
+                                    {alert.driverPhone || "—"}
+                                  </a>
+                                </p>
+                              </>
+                            )}
                           </div>
 
                           {/* Distance & ETA */}
                           <div className="grid grid-cols-2 gap-3 mb-4">
-                            <motion.div
-                              key={`dist-${alert.alertId}-${recalcTrigger}`}
-                              animate={{ scale: [1, 1.05, 1] }}
-                              transition={{ duration: 0.5 }}
-                              className="bg-gradient-to-br from-blue-100 to-cyan-100 dark:from-blue-900/50 dark:to-cyan-900/50 p-4 rounded-lg"
-                            >
+                            <div className="bg-gradient-to-br from-blue-100 to-cyan-100 dark:from-blue-900/50 dark:to-cyan-900/50 p-4 rounded-lg">
                               <p className="text-xs text-blue-700 dark:text-blue-300 font-semibold mb-1">
                                 <HiMapPin className="inline w-4 h-4 mr-1" />
                                 Distance (Live)
@@ -350,7 +358,9 @@ export default function HospitalPrealerts() {
                               {alert.distanceKm !== null ? (
                                 <>
                                   <p className="text-3xl font-extrabold text-blue-900 dark:text-blue-100">
-                                    {alert.distanceKm < 1 ? distanceMeters?.toFixed(0) : alert.distanceKm.toFixed(1)}
+                                    {alert.distanceKm < 1
+                                      ? distanceMeters?.toFixed(0)
+                                      : alert.distanceKm.toFixed(1)}
                                   </p>
                                   <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
                                     {alert.distanceKm < 1
@@ -359,16 +369,13 @@ export default function HospitalPrealerts() {
                                   </p>
                                 </>
                               ) : (
-                                <p className="text-lg font-bold text-blue-700 dark:text-blue-300">Locating...</p>
+                                <p className="text-lg font-bold text-blue-700 dark:text-blue-300">
+                                  Locating...
+                                </p>
                               )}
-                            </motion.div>
+                            </div>
 
-                            <motion.div
-                              key={`eta-${alert.alertId}-${recalcTrigger}`}
-                              animate={{ scale: [1, 1.05, 1] }}
-                              transition={{ duration: 0.5 }}
-                              className="bg-gradient-to-br from-purple-100 to-pink-100 dark:from-purple-900/50 dark:to-pink-900/50 p-4 rounded-lg"
-                            >
+                            <div className="bg-gradient-to-br from-purple-100 to-pink-100 dark:from-purple-900/50 dark:to-pink-900/50 p-4 rounded-lg">
                               <p className="text-xs text-purple-700 dark:text-purple-300 font-semibold mb-1">
                                 <HiClock className="inline w-4 h-4 mr-1" />
                                 Estimated Time
@@ -376,41 +383,85 @@ export default function HospitalPrealerts() {
                               <p className="text-3xl font-extrabold text-purple-900 dark:text-purple-100">
                                 {alert.eta}
                               </p>
-                              <p className="text-xs text-purple-700 dark:text-purple-300 mt-1">
-                                {canMarkArrived ? "✅ Almost here!" : ""}
-                              </p>
-                            </motion.div>
+                              {!isCrowd && alert.distanceKm !== null && alert.distanceKm <= 0.5 && (
+                                <p className="text-xs text-green-700 dark:text-green-300 mt-1">
+                                  ✅ Almost here!
+                                </p>
+                              )}
+                            </div>
                           </div>
 
-                          {/* Action Buttons */}
-                          <div className="grid grid-cols-2 gap-3">
-                            <button
-                              onClick={() => markArrived(alert.alertId, alert.distanceKm)}
-                              disabled={!canMarkArrived}
-                              className={`px-4 py-3 rounded-lg font-semibold transition-all flex items-center justify-center gap-2 ${
-                                canMarkArrived
-                                  ? "bg-green-600 hover:bg-green-700 text-white shadow-lg"
-                                  : "bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed"
-                              }`}
-                              title={canMarkArrived ? "Mark as arrived" : "Distance must be < 500m"}
-                            >
-                              <HiCheckCircle className="w-5 h-5" />
-                              Arrived
-                            </button>
-                            <button
-                              onClick={() => window.open(`tel:${alert.driverPhone}`)}
-                              className="px-4 py-3 rounded-lg font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-all flex items-center justify-center gap-2 shadow-lg"
-                            >
-                              <HiPhone className="w-5 h-5" />
-                              Contact
-                            </button>
-                          </div>
-
-                          {!canMarkArrived && alert.distanceKm !== null && (
-                            <p className="text-xs text-orange-700 dark:text-orange-300 mt-3 text-center">
-                              ⚠️ Ambulance is {alert.distanceKm < 1 ? `${distanceMeters?.toFixed(0)}m` : `${alert.distanceKm.toFixed(2)}km`} away.
-                            </p>
+                          {/* Actions */}
+                          {isCrowd ? (
+                            <div className="grid grid-cols-3 gap-3">
+                              {/* Arrived for crowd (always enabled) */}
+                              <button
+                                onClick={() => markArrived(alert.alertId)}
+                                className="px-4 py-3 rounded-lg bg-green-600 hover:bg-green-700 text-white font-semibold"
+                                title="Mark as arrived"
+                              >
+                                Arrived
+                              </button>
+                              <button
+                                onClick={() => declineAlert(alert.alertId)}
+                                className="px-4 py-3 rounded-lg bg-red-600 hover:bg-red-700 text-white font-semibold"
+                              >
+                                Decline (Fake)
+                              </button>
+                              <button
+                                onClick={() =>
+                                  alert.contactNumber && window.open(`tel:${alert.contactNumber}`)
+                                }
+                                className="px-4 py-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold flex items-center justify-center gap-2"
+                                title="Call Crowd"
+                              >
+                                <HiPhone className="w-5 h-5" />
+                                Call Crowd
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-2 gap-3">
+                              <button
+                                onClick={() => markArrived(alert.alertId)}
+                                disabled={!(alert.distanceKm != null && alert.distanceKm <= 0.5)}
+                                className={`px-4 py-3 rounded-lg font-semibold transition-all flex items-center justify-center gap-2 ${
+                                  alert.distanceKm != null && alert.distanceKm <= 0.5
+                                    ? "bg-green-600 hover:bg-green-700 text-white shadow-lg"
+                                    : "bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed"
+                                }`}
+                                title={
+                                  alert.distanceKm != null && alert.distanceKm <= 0.5
+                                    ? "Mark as arrived"
+                                    : "Distance must be < 500m"
+                                }
+                              >
+                                <HiCheckCircle className="w-5 h-5" />
+                                Arrived
+                              </button>
+                              <button
+                                onClick={() =>
+                                  alert.driverPhone && window.open(`tel:${alert.driverPhone}`)
+                                }
+                                className="px-4 py-3 rounded-lg font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-all flex items-center justify-center gap-2 shadow-lg"
+                              >
+                                <HiPhone className="w-5 h-5" />
+                                Call Driver
+                              </button>
+                            </div>
                           )}
+
+                          {/* Distance note for drivers */}
+                          {!isCrowd &&
+                            !(alert.distanceKm != null && alert.distanceKm <= 0.5) &&
+                            alert.distanceKm !== null && (
+                              <p className="text-xs text-orange-700 dark:text-orange-300 mt-3 text-center">
+                                ⚠️ Ambulance is{" "}
+                                {alert.distanceKm < 1
+                                  ? `${distanceMeters?.toFixed(0)}m`
+                                  : `${alert.distanceKm.toFixed(2)}km`}{" "}
+                                away.
+                              </p>
+                            )}
                         </motion.div>
                       );
                     })}
@@ -427,15 +478,13 @@ export default function HospitalPrealerts() {
                   </p>
                 </motion.div>
               )}
-            </div>
+            </section>
 
             {/* COMPLETED SECTION */}
-            <div>
+            <section>
               <div className="flex items-center gap-2 mb-4">
                 <div className="w-1 h-8 bg-gradient-to-b from-green-500 to-emerald-500 rounded-full"></div>
-                <h2 className="text-2xl font-bold text-cyan-800 dark:text-cyan-100">
-                  ✓ Completed
-                </h2>
+                <h2 className="text-2xl font-bold text-cyan-800 dark:text-cyan-100">✓ Completed</h2>
                 <span className="ml-auto px-3 py-1 bg-green-600 text-white rounded-full text-sm font-bold">
                   {completedAlerts.length}
                 </span>
@@ -457,36 +506,45 @@ export default function HospitalPrealerts() {
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
                           <div>
                             <p className="text-xs text-green-700 dark:text-green-300 font-semibold uppercase">
-                              Ambulance
+                              Type
                             </p>
                             <p className="text-lg font-bold text-green-900 dark:text-green-100">
-                              {alert.ambulanceNumber || alert.ambulanceType || "—"}
+                              {alert.type === "crowd" ? "Crowd" : alert.ambulanceType || "Ambulance"}
                             </p>
                           </div>
-
                           <div>
                             <p className="text-xs text-green-700 dark:text-green-300 font-semibold uppercase">
-                              Driver Name
+                              Name / Contact
                             </p>
                             <p className="text-lg font-bold text-green-900 dark:text-green-100">
-                              {alert.driverName || alert.driverId || "—"}
+                              {alert.type === "crowd"
+                                ? alert.contactNumber || "—"
+                                : alert.driverName || alert.driverId || "—"}
                             </p>
                           </div>
-
                           <div>
                             <p className="text-xs text-green-700 dark:text-green-300 font-semibold uppercase">
-                              Time of Arrival
+                              Updated At
                             </p>
                             <p className="text-lg font-bold text-green-900 dark:text-green-100">
-                              {alert.arrivedAt ? new Date(alert.arrivedAt).toLocaleTimeString() : "—"}
+                              {alert.arrivedAt
+                                ? new Date(alert.arrivedAt).toLocaleTimeString()
+                                : alert.declinedAt
+                                ? new Date(alert.declinedAt).toLocaleTimeString()
+                                : "—"}
                             </p>
                           </div>
-
                           <div className="flex items-center justify-end">
-                            <div className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg font-semibold">
-                              <HiCheckCircle className="w-5 h-5" />
-                              Completed
-                            </div>
+                            {alert.status === "arrived" ? (
+                              <div className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg font-semibold">
+                                <HiCheckCircle className="w-5 h-5" />
+                                Completed
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg font-semibold">
+                                Declined
+                              </div>
+                            )}
                           </div>
                         </div>
                       </motion.div>
@@ -504,7 +562,7 @@ export default function HospitalPrealerts() {
                   </p>
                 </motion.div>
               )}
-            </div>
+            </section>
           </div>
         </main>
       </div>

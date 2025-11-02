@@ -1,4 +1,6 @@
+// src/pages/HospitalDashboard.jsx
 import React, { useEffect, useState, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import HospitalSidebar from "../components/HospitalSidebar";
 import { ref, onValue, off, update, get } from "firebase/database";
 import { db, auth } from "../firebase/firebase";
@@ -20,6 +22,8 @@ function haversineKm(a, b) {
 }
 
 export default function HospitalDashboard() {
+  const navigate = useNavigate();
+
   const [uid, setUid] = useState(null);
   const [hospitalLoc, setHospitalLoc] = useState(null);
   const [capacity, setCapacity] = useState({ bedsTotal: 0, icuTotal: 0 });
@@ -31,8 +35,8 @@ export default function HospitalDashboard() {
   });
   const [prealerts, setPrealerts] = useState({});
   const [driverLoc, setDriverLoc] = useState({});
-  
-  // Location Modal States
+
+  // Location Modal States (unchanged)
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [geoLoading, setGeoLoading] = useState(false);
   const [geoMessage, setGeoMessage] = useState("");
@@ -92,18 +96,36 @@ export default function HospitalDashboard() {
     return () => off(r, "value", h);
   }, [uid]);
 
-  // Subscribe to prealerts
+  // Subscribe to prealerts (realtime)
   useEffect(() => {
     if (!uid) return;
     const r = ref(db, `prealerts/${uid}`);
     const h = onValue(r, (snap) => setPrealerts(snap.val() || {}));
     return () => off(r, "value", h);
   }, [uid]);
-  // Get location with GPS
+
+  // Subscribe to driver locations only for active alerts (pending/en_route/no status)
+  useEffect(() => {
+    if (!uid) return;
+    const active = Object.entries(prealerts)
+      .map(([alertId, p]) => ({ alertId, ...p }))
+      .filter((p) => p && (p.status === "pending" || p.status === "en_route" || !p.status));
+
+    const driverIds = Array.from(new Set(active.map((p) => p.driverId).filter(Boolean)));
+    const subs = driverIds.map((dId) => {
+      const r = ref(db, `driverLocations/${dId}`);
+      const h = onValue(r, (snap) => {
+        setDriverLoc((prev) => ({ ...prev, [dId]: snap.val() || null }));
+      });
+      return { r, h };
+    });
+    return () => subs.forEach(({ r, h }) => off(r, "value", h));
+  }, [uid, prealerts]);
+
+  // Get location with GPS (unchanged)
   const handleGetLocation = async () => {
     setGeoLoading(true);
     setGeoMessage("");
-
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
@@ -130,13 +152,12 @@ export default function HospitalDashboard() {
     }
   };
 
-  // Save location to database
+  // Save location (unchanged)
   const handleSaveLocation = async () => {
     if (!uid || !tempLat || !tempLng) {
       setGeoMessage("❌ Please get location first");
       return;
     }
-
     setGeoLoading(true);
     try {
       await update(ref(db, `hospitals/${uid}`), {
@@ -157,7 +178,7 @@ export default function HospitalDashboard() {
     }
   };
 
-  // Compute KPIs
+  // KPIs (keep)
   const kpis = useMemo(
     () => ({
       bedsAvail: Math.max((capacity.bedsTotal || 0) - (stats.bedsOccupied || 0), 0),
@@ -168,32 +189,42 @@ export default function HospitalDashboard() {
     [capacity, stats]
   );
 
-  // Map prealerts to cards with distance
-  const cards = useMemo(() => {
-    if (!hospitalLoc) return [];
-    return Object.entries(prealerts)
-      .map(([alertId, p]) => {
-        if (!p) return null;
-        const d = driverLoc[p.driverId];
-        let distanceKm = null;
-        if (d && d.lat !== undefined && d.lng !== undefined) {
-          const km = haversineKm(hospitalLoc, d);
-          distanceKm = km ? km.toFixed(2) : null;
-        }
-        return { alertId, ...p, distanceKm };
-      })
-      .filter(Boolean);
-  }, [prealerts, driverLoc, hospitalLoc]);
+  // Active Pre‑Alerts overview list (no buttons; clicking row navigates to Pre‑Alerts)
+  const activeList = useMemo(() => {
+    const list = Object.entries(prealerts).map(([alertId, p]) => ({ alertId, ...p }));
+    const active = list.filter(
+      (p) => p && (p.status === "pending" || p.status === "en_route" || !p.status)
+    );
 
-  // Update prealert status
-  const setStatus = async (alertId, status) => {
-    if (!uid) return;
-    try {
-      await update(ref(db, `prealerts/${uid}/${alertId}`), { status });
-    } catch (err) {
-      console.error("Error updating status:", err);
+    // Attach a distance label using driver or crowd location
+    if (hospitalLoc) {
+      active.forEach((p) => {
+        let km = null;
+        if (p.type === "crowd" && p.userLocation) {
+          km = haversineKm(hospitalLoc, p.userLocation);
+        } else if (p.driverId && driverLoc[p.driverId]) {
+          km = haversineKm(hospitalLoc, driverLoc[p.driverId]);
+        }
+        p.distanceLabel =
+          km == null ? "—" : km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(2)} km`;
+      });
     }
-  };
+
+    // Sort by numeric distance if available
+    active.sort((a, b) => {
+      const parseDist = (x) =>
+        typeof x === "string"
+          ? x.endsWith("km")
+            ? parseFloat(x)
+            : x.endsWith("m")
+            ? parseFloat(x) / 1000
+            : Infinity
+          : Infinity;
+      return parseDist(a.distanceLabel) - parseDist(b.distanceLabel);
+    });
+
+    return active;
+  }, [prealerts, driverLoc, hospitalLoc]);
 
   return (
     <div className="min-h-screen bg-gradient-to-tr from-blue-100 via-cyan-200 to-teal-100 dark:from-blue-950 dark:via-cyan-900 dark:to-teal-950">
@@ -207,42 +238,17 @@ export default function HospitalDashboard() {
                 Hospital Dashboard
               </h1>
 
-              {/* Location Display/Set Button */}
-              <div className="flex items-center gap-3">
-                {hospitalLoc &&
-                hospitalLoc.lat !== undefined &&
-                hospitalLoc.lng !== undefined &&
-                hospitalLoc.lat !== 0 &&
-                hospitalLoc.lng !== 0 ? (
-                  // Show Location Badge
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-green-400 to-emerald-400 rounded-lg shadow-md cursor-pointer hover:shadow-lg transition-all"
-                    onClick={() => setShowLocationModal(true)}
-                  >
-                    <span className="text-sm font-bold text-white">
-                      📍 {hospitalLoc.lat.toFixed(3)}, {hospitalLoc.lng.toFixed(3)}
-                    </span>
-                  </motion.div>
-                ) : (
-                  // Show SET Button
-                  <motion.button
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    whileHover={{ scale: 1.05 }}
-                    onClick={() => setShowLocationModal(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-bold rounded-lg shadow-lg transition-all cursor-pointer"
-                  >
-                    <span>📍</span>
-                    <span>SET Location</span>
-                  </motion.button>
-                )}
+              {/* Compact counters in top bar */}
+              <div className="text-cyan-900/80 dark:text-cyan-100/80 text-sm font-semibold flex gap-4">
+                <span>Beds: {kpis.bedsAvail}/{capacity.bedsTotal || 0}</span>
+                <span>ICU: {kpis.icuAvail}/{capacity.icuTotal || 0}</span>
+                <span>Admitted: {kpis.admitted}</span>
+                <span>Inflow: {kpis.inflow}</span>
               </div>
             </div>
           </div>
 
-          {/* Location Modal */}
+          {/* Location Modal (unchanged) */}
           <AnimatePresence>
             {showLocationModal && (
               <motion.div
@@ -271,7 +277,6 @@ export default function HospitalDashboard() {
                     </button>
                   </div>
 
-                  {/* Location Display */}
                   {tempLat && tempLng && (
                     <div className="mb-4 p-3 bg-cyan-50 dark:bg-cyan-900/30 rounded-lg border border-cyan-200 dark:border-cyan-700">
                       <p className="text-sm text-cyan-800 dark:text-cyan-200">
@@ -283,7 +288,6 @@ export default function HospitalDashboard() {
                     </div>
                   )}
 
-                  {/* Message */}
                   {geoMessage && (
                     <motion.div
                       initial={{ opacity: 0, y: -10 }}
@@ -298,7 +302,6 @@ export default function HospitalDashboard() {
                     </motion.div>
                   )}
 
-                  {/* Buttons */}
                   <div className="space-y-3">
                     <button
                       onClick={handleGetLocation}
@@ -330,7 +333,7 @@ export default function HospitalDashboard() {
 
           {/* Content */}
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-            {/* KPI Cards */}
+            {/* KPI Tiles (kept) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {[
                 { label: "Beds available", value: kpis.bedsAvail },
@@ -346,70 +349,79 @@ export default function HospitalDashboard() {
                   className="rounded-2xl p-4 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md ring-1 ring-cyan-100 dark:ring-cyan-900 shadow-lg"
                 >
                   <p className="text-sm text-cyan-800/80 dark:text-cyan-200/80">{stat.label}</p>
-                  <p className="text-2xl font-extrabold text-cyan-700 dark:text-cyan-100">
-                    {stat.value}
-                  </p>
+                  <p className="text-2xl font-extrabold text-cyan-700 dark:text-cyan-100">{stat.value}</p>
                 </motion.div>
               ))}
             </div>
 
-            {/* Pre-Alerts Section */}
+            {/* New Pre‑Alerts overview list (active only; no buttons; click to open Pre‑Alerts) */}
             <div>
-              <h2 className="text-lg font-bold text-cyan-700 dark:text-cyan-300 mb-4">
-                Pre‑Alerts ({cards.length})
-              </h2>
-              <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
-                {cards.map((c) => (
-                  <motion.div
-                    key={c.alertId}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="rounded-2xl p-4 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md ring-1 ring-cyan-100 dark:ring-cyan-900"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="font-bold text-cyan-800 dark:text-cyan-100">
-                        Incoming Pre‑Alert
-                      </div>
-                      <span
-                        className={`text-xs px-2 py-1 rounded font-semibold ${
-                          c.status === "accepted"
-                            ? "bg-green-600/20 text-green-900 dark:text-green-100"
-                            : c.status === "declined"
-                            ? "bg-red-600/20 text-red-900 dark:text-red-100"
-                            : "bg-cyan-600/20 text-cyan-900 dark:text-cyan-100"
-                        }`}
-                      >
-                        {c.status ?? "pending"}
-                      </span>
-                    </div>
-                    <div className="mt-2 text-sm text-cyan-900/90 dark:text-cyan-100/90 space-y-1">
-                      <div>Driver: {c.driverId || "—"}</div>
-                      <div>Ambulance: {c.ambulanceType || "Unknown"}</div>
-                      <div>Distance: {c.distanceKm ? `${c.distanceKm} km` : "—"}</div>
-                      {c.eta && <div>ETA: {c.eta}</div>}
-                    </div>
-                    <div className="mt-3 flex gap-2">
-                      <button
-                        onClick={() => setStatus(c.alertId, "accepted")}
-                        className="flex-1 px-3 py-2 rounded bg-green-600 hover:bg-green-700 text-white text-sm font-semibold transition"
-                      >
-                        Accept
-                      </button>
-                      <button
-                        onClick={() => setStatus(c.alertId, "declined")}
-                        className="flex-1 px-3 py-2 rounded bg-red-600 hover:bg-red-700 text-white text-sm font-semibold transition"
-                      >
-                        Decline
-                      </button>
-                    </div>
-                  </motion.div>
-                ))}
-                {cards.length === 0 && (
-                  <div className="col-span-full text-center text-cyan-900/80 dark:text-cyan-100/80 py-12">
-                    No pre‑alerts yet.
-                  </div>
-                )}
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-lg font-bold text-cyan-700 dark:text-cyan-300">
+                  Active Pre‑Alerts
+                </h2>
+                <span className="px-3 py-1 bg-red-600 text-white rounded-full text-sm font-bold">
+                  {activeList.length}
+                </span>
               </div>
+
+              <div className="rounded-2xl overflow-hidden bg-white/80 dark:bg-zinc-900/80 ring-1 ring-cyan-100 dark:ring-cyan-900">
+                <div className="divide-y divide-cyan-100 dark:divide-cyan-900">
+                  {activeList.length > 0 ? (
+                    activeList.map((a) => {
+                      const isCrowd = a.type === "crowd";
+                      return (
+                        <button
+                          key={a.alertId}
+                          onClick={() => navigate("/prealerts")}
+                          className="w-full text-left px-4 py-3 hover:bg-cyan-50 dark:hover:bg-cyan-900/20 transition flex items-center justify-between"
+                          title="Open Pre‑Alerts"
+                        >
+                          <div className="flex items-center gap-3">
+                            <span
+                              className={`text-xs px-2 py-1 rounded font-semibold ${
+                                isCrowd
+                                  ? "bg-rose-600/20 text-rose-800 dark:text-rose-100"
+                                  : "bg-cyan-600/20 text-cyan-900 dark:text-cyan-100"
+                              }`}
+                            >
+                              {isCrowd ? "CROWD" : "DRIVER"}
+                            </span>
+                            <div className="text-sm">
+                              <div className="font-semibold text-cyan-900 dark:text-cyan-100">
+                                {isCrowd
+                                  ? a.contactNumber || "Crowd Emergency"
+                                  : a.driverName || a.driverId || "Ambulance"}
+                              </div>
+                              <div className="text-cyan-800/80 dark:text-cyan-200/80">
+                                {isCrowd ? "Emergency reported by the public" : a.ambulanceType || "Ambulance"}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-sm font-semibold text-cyan-900 dark:text-cyan-100">
+                              {a.distanceLabel || "—"}
+                            </div>
+                            <div className="text-xs text-cyan-800/70 dark:text-cyan-200/70">
+                              {a.status || "pending"}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <div className="px-4 py-8 text-center text-cyan-900/80 dark:text-cyan-100/80">
+                      No active pre‑alerts
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <p className="text-xs text-cyan-800/70 dark:text-cyan-200/70 mt-2">
+                This list updates in real‑time and only shows pending or en‑route alerts; once marked
+                arrived or declined in Pre‑Alerts, they disappear here automatically. Click any row to open
+                the Pre‑Alerts page for full actions and details.
+              </p>
             </div>
           </div>
         </main>

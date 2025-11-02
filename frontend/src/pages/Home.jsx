@@ -21,21 +21,33 @@ export default function Home() {
               Live driver tracking, instant pre‑arrival alerts, and capacity‑aware routing to cut response times when every minute matters.
             </p>
             <p className="mt-4 text-cyan-800/80 dark:text-cyan-200/90 text-lg"> Want to contribute your efforts to help the community? </p>
-            <div className="mt-8 flex flex-col sm:flex-row gap-3">
-              <button
-                aria-label="Hospital Staff Login"
-                className="flex-1 sm:flex-none px-6 py-3 rounded-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold shadow-md"
-                onClick={() => navigate("/HSregister")}
-              >
-                I’m Hospital Staff
-              </button>
-              <button
-                aria-label="Ambulance Driver Login"
-                className="flex-1 sm:flex-none px-6 py-3 rounded-full bg-white/80 hover:bg-white text-cyan-800 font-bold shadow-md ring-1 ring-cyan-200"
-                onClick={() => navigate("/DRregister")}
-              >
-                I’m a Driver
-              </button>
+            <div className="mt-8 space-y-4">
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button
+                  aria-label="Hospital Staff Login"
+                  className="flex-1 sm:flex-none px-6 py-3 rounded-full bg-cyan-600 hover:bg-cyan-700 text-white font-bold shadow-md transition"
+                  onClick={() => navigate("/HSregister")}
+                >
+                  I'm Hospital Staff
+                </button>
+                <button
+                  aria-label="Ambulance Driver Login"
+                  className="flex-1 sm:flex-none px-6 py-3 rounded-full bg-white/80 hover:bg-white text-cyan-800 font-bold shadow-md ring-1 ring-cyan-200 transition"
+                  onClick={() => navigate("/DRregister")}
+                >
+                  I'm a Driver
+                </button>
+              </div>
+              <div className="flex flex-col sm:flex-row items-center gap-3 pt-2 border-t border-cyan-200 dark:border-cyan-800">
+                <p className="text-cyan-800 dark:text-cyan-200 font-semibold">Is There an Emergency??</p>
+                <button
+                  aria-label="Emergency Crowd Dashboard"
+                  className="px-6 py-3 rounded-full bg-red-600 hover:bg-red-700 text-white font-bold shadow-md transition"
+                  onClick={() => navigate("/crowddashboard")}
+                >
+                  Emergency - Crowd
+                </button>
+              </div>
             </div>
 
           </div>
